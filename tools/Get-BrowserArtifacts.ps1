@@ -3,7 +3,7 @@ function Get-BrowserArtifacts{
         .SYNOPSIS
             Gets browser artifacts.
         .DESCRIPTION
-            Fetches Chrome, Edge, Firefox and IE forensic artifacts.
+            Fetches Chrome, Edge, Firefox artifacts.
         .PARAMETER Quiet
             Disables terminal output.
         .PARAMETER Browser
@@ -31,56 +31,14 @@ function Get-BrowserArtifacts{
             [Parameter][string]
             $Browser,
             [Parameter][string]
-            $Outpath = 'C:\Temp\BrowserArtifacts',
+            $Outpath = "$ENV:Temp\BrowserCollection\",
             [Parameter][string]
-            $TargetUser
+            $TargetUser,
+            [Parameter][string]
+            $AppDataPath = "$TargetUser\Appdata\"
         )
 
-        #TODO: De-jankify....Just need the folder path for the Users directory
-        $UserProfile = if($TargetUser -like "*@*"){
-            Get-LocalUserFromAlias -TargetUser $TargetUser
-            }else{
-                return "C:\Users\$TargetUser"
-            }
-        
-        $IsConstrained = $ExecutionContext.SessionState.LanguageMode -eq 'ConstrainedLanguage'
-        $AppDataPath = "$Profile\AppData"
-
-        if (!(Get-Item $Outpath)){
-            New-Item -Path $Outpath -ItemType Directory
-        }
-        switch ($browser) {
-            condition { 
-                Chrome {
-                    Get-ChromeArtifacts -Outpath $Outpath -UserProfile $UserProfile -AppDataPath $AppDataPath
-                }
-                Firefox {
-                    Get-FirefoxArtifacts -Outpath $Outpath -UserProfile $UserProfile -AppDataPath $AppDataPath
-                }
-                Edge {
-                    Get-EdgeArtifacts -Outpath $Outpath -UserProfile $UserProfile -AppDataPath $AppDataPath
-                }
-                InternetExplorer {
-                    Get-InternetExplorerArtifacts -Outpath $Outpath -UserProfile $UserProfile 
-                }
-                Default {
-                    Get-FirefoxArtifacts -Outpath $Outpath -UserProfile $Profile
-                    Get-EdgeArtifacts -Outpath $Outpath -UserProfile $Profile
-                    Get-ChromeArtifacts -Outpath $Outpath -UserProfile $Profile
-                    Get-InternetExplorerArtifacts -Outpath $Outpath -UserProfile $Profile
-                }
-            }
-        }
-
-        Write-Log -Message "Compressing browser artifacts for download"
-        $Compressed = Compress-Archive -Path $Outpath -DestinationPath "$Outpath.zip" -Force
-        Write-Log -Message "Archive available at $Outpath.zip"
-
-        #TODO: Test
-        function Get-UserSid{
-            $SID = Get-LocalUser $TargetUser | Select-Object Sid
-            return $SID
-        }
+        $LogFile = (New-Item $Outpath + "collectionLog.txt").FullName
 
         #TODO: Works in test
         function Get-LocalUserFromAlias{
@@ -90,14 +48,13 @@ function Get-BrowserArtifacts{
             $TargetUser
             )
             $UserProfiles = (Get-ChildItem "C:\Users" -ErrorAction Ignore).FullName
-            $TargetUserProfile = foreach($i in $UserProfiles){
+            foreach($i in $UserProfiles){
                 $AADPlugin = (Get-ChildItem "$i\AppData\Local\Packages" -Filter "Microsoft.AAD.BrokerPlugin*" -ErrorAction Ignore).FullName
                 $AADSettings = "$AADPlugin\Settings\settings.dat"
                 if(Select-String -Pattern $TargetUser -Path $AADSettings -ErrorAction Ignore){ 
-                    return $i
+                    $i
                 }
             }
-            return $TargetUserProfile
         }
 
         #TODO: Test
@@ -110,6 +67,7 @@ function Get-BrowserArtifacts{
             $isValid = $TargetUser -like '^([\w\.\-]+)@([\w\-]+)((\.(\w){2,3})+)$' ###looking for _@_._
             return $isValid
         }
+
         #TODO: Test
         function Get-AppdataPath{
             [CmdletBinding()]
@@ -121,87 +79,119 @@ function Get-BrowserArtifacts{
             $AppDataPath = Get-ChildItem $AppDataKey
             return $appDataPath
         }
-        #TODO: Test
-        function Get-EdgeArtifacts{
-            [CmdletBinding()]
-            param (
-            [Parameter][string]
-            $OutFolder = 'C:\Temp',
-            [Parameter(Mandatory=$True)][string]
-            $AppDataPath
+
+        function Get-TargetArtifacts{
+            [cmdletbinding()]
+            param (        
+                [Parameter(Mandatory=$true)][string]
+                $SourcePath,
+                [Parameter(Mandatory=$true)][array]
+                $TargetArtifacts,
+                [Parameter(Mandatory=$true)][array]
+                $DestPath
             )
 
-            $destFolder = $OutFolder + "\Edge"
-            $dataPath = "$AppDataPath\Local\Microsoft\Edge\User Data\Default"
+            foreach($i in $TargetArtifacts){
+                try{
+                    Write-Log "Fetching $i artifact"
+                    Copy-Item -Path "$SourcePath\$i" -Destination $DestPath
+                    Write-Log "$i artifact successfully gathered." -Level "Info"
+                }
+                catch{
+                    Write-Log -Level 1 -Message "$i artifact not found"
+                }
+            }
+        }
+
+
+        #TODO: Test
+        function Get-EdgeArtifacts{
+            $outPath = (New-Item -ItemType Directory -Path $OutPath+"Edge\").FullName
+            $dataPath = "$AppDataPath\Local\Microsoft\Edge\User Data\"
             $profiles = Get-ChildItem -Path $dataPath -Filter "Profile*"
-            
-            if ($profiles){
-                Write-Log -Level 0 "Multiple profiles detected, grabbing all profiles."
+            $profiles = $profiles.add("Default")
+            $optArtifacts = {'load_statistics.db'}
+            try{
+                foreach($p in $profiles){
+                    $profilePath = $dataPath+$p.Name
+                    Write-Log -Level 0 -Message "Grabbing profile - $p"
+                    Get-ChromiumArtifacts -SourcePath $profilePath -DestinationPath "$outPath\$p\" -OptArtifacts $optArtifacts
+                }
+            }
+            catch {
+                Write-Log -Level 2 "Error fetching Edge Artifacts"
+            }
+        }
+
+        #TODO: Test
+        function Get-ChromeArtifacts{   
+            $outPath = (New-Item -ItemType Directory -Path $OutPath+"Chrome\").FullName
+            $dataPath = "$AppDataPath\Local\Google\Chrome\User Data\"
+            $profiles = Get-ChildItem -Path $dataPath -Filter "Profile*"
+            $profiles = $profile.add("Default")
+            try{
                 foreach($p in $profiles){
                     $profilePath = "$dataPath/$p"
                     Write-Log -Level 0 -Message "Grabbing $p"
                     Get-ChromiumArtifacts -SourcePath $profilePath -DestinationPath "$destFolder/$p"
                 }
             }
-
-            Get-ChromiumArtifacts -SourcePath $dataPath -DestinationPath $folder
-            return $result
-        }
-        #TODO: Test
-        function Get-ChromeArtifacts{   
-            [CmdletBinding()]
-            param (
-            [Parameter][string]
-            $OutFolder = 'C:\Temp',
-            [Parameter(Mandatory=$True)][string]
-            $AppDataPath
-            )
-
-            $destFolder = $OutFolder + "\Chrome"
-            $dataPath = "$AppDataPath\Local\Google\Chrome\User Data\Default"
-            $profiles = Get-ChildItem -Path $dataPath -Filter "Profile*"
-            $result = $false
-            
-            try {
-                if ($profiles){
-                    Write-Log -Level 0 "Multiple profiles detected, grabbing all profiles."
-                    foreach($p in $profiles){
-                        $profilePath = "$dataPath/$p"
-                        Write-Log -Level 0 -Message "Grabbing $p"
-                        Get-ChromiumArtifacts -SourcePath $profilePath -DestinationPath "$destFolder/$p"
-                    }
-                }
-    
-                Get-ChromiumArtifacts -SourcePath $dataPath -DestinationPath $destFolder
-                $result = $true
-            }
             catch {
                 Write-Log -Level 2 "Error fetching Chrome Artifacts"
             }
-
-            return $result
         }
 
-        #TODO: Identify necessary artifacts....which I'm pretty sure are all stored in the ntuser.dat
-        function Get-InternetExplorerArtifacts{
-            $folder = $Outpath + "\InternetExplorer"
-            $dataPath = "AppData\Local\Microsoft\Edge\User Data\Default"
-            return $result
+        function Get-ChromiumArtifacts{   
+            [CmdletBinding()]
+            param (
+            [Parameter(Mandatory=$True)][string]
+            $ProfilePath,
+            [Parameter][array]
+            $OptArtifacts
+            )
+            $targetArtifacts = {
+                "history",
+                "cookies",
+                "cache",
+                "web data",
+                "extensions"
+            }
+            if ($OptArtifacts){
+                foreach ($i in $OptArtifacts){
+                    $targetArtifacts.Add($i)
+                }
+            }
+
+            foreach ($a in $targetArtifacts){
+                try {
+                    Write-Log -Level 0 "Grabbing $a"
+                    Copy-Item -Recurse -Path $ProfilePath+$a
+                    }
+                catch {
+                    Write-Log -Level 2 "Error fetching $a Artifacts"
+                }
+            }
         }
+
+
+        # #TODO: Identify if even necessary 
+        # function Get-InternetExplorerArtifacts{
+        #     $folder = $Outpath + "\InternetExplorer"
+        #     $dataPath = "AppData\Local\Microsoft\Edge\User Data\Default"
+        #     return $result
+        # }
 
         #TODO: Identify Necessary Artifacts
         function Get-FirefoxArtifacts{
             [CmdletBinding()]
             param (
-            [Parameter][string]
-            $Outpath = 'C:\Temp',
             [Parameter(Mandatory=$True)][string]
             $AppDataPath,
             [Parameter][string]
             $TargetUser
             )
-            $folder = $Outpath + "\Firefox"
-            $dataPath = "$AppData\Roaming\Mozilla\Firefox\Profiles"
+            $outPath = (New-Item -ItemType Directory -Path $OutPath+"Firefox\").FullName
+            $dataPath = "$AppData\Roaming\Mozilla\Firefox\Profiles\"
             $targetArtifacts = {
                 "places.sqlite", 
                 "formhistory.sqlite", 
@@ -211,57 +201,20 @@ function Get-BrowserArtifacts{
                 "signons.sqlite",
                 "extensions.json"
             }
-
-            if ($TargetUser){
                 $profiles = Get-ChildItem $dataPath
-
-                foreach($p in $profiles.Name){
-                    Write-Log "Scanning profile folders for $TargetUser's profile"
-
-                    if (Select-String -Pattern $TargetUser -InputObject "$dataPath\$p\signedInUser.json"){
-                        Write-Log "$TargerUser's profile found at $dataPath\$p"
-                        Get-TargetArtifacts -SourcePath "$dataPath\$p" -DestinationPath "$Outpath\$p" -TargetArtifacts $targetArtifacts
-                    } else {
-                        Write-Log "$TargetUser not found in $dataPath\$p"
-                    }
-                }
-            } else{
-                $profiles = Get-ChildItem $dataPath
+            try{
                 foreach($p in $profiles){
-                    $profileFolder = New-Item -Path $folder + $p.Name -ItemType Directory
-                    Get-TargetArtifacts -SourcePath "$dataPath\$p" -DestinationPath "$Outpath\$p" `
+                    New-Item -Path $Outpath+$p.Name -ItemType Directory
+                    Get-TargetArtifacts -SourcePath $dataPath+$p -DestinationPath $outpath+$p `
                     -TargetArtifacts $targetArtifacts
                 }
             }
-
-        }
-
-        #TODO: Test
-        function Get-Targetrtifacts{
-            [cmdletbinding()]
-            param (        
-                [Parameter(Mandatory=$true)][string]
-                $SourcePath,
-                [Parameter(Mandatory=$true)][string]
-                $DestinationPath,
-                [Parameter(Mandatory=$true)][array]
-                $TargetArtifacts
-            )
-
-            foreach($i in $TargetArtifacts){
-                try{
-                    Write-Log "Fetching $i artifact"
-                    Copy-Item -Path "$SourcePath\$i" -Destination $DestinationPath
-                    Write-Log "$i artifact successfully gathered." -Level "Info"
-                }
-                catch{
-                    Write-Log -Level 1 -Message "$i artifact not found"
-                }
+            catch {
+                Write-Log -Level 2 "Error fetching Firefox Artifacts"
             }
-        return $result
+
         }
 
-        #TODO: Finish incorporating Logging.
         function Write-Log{
             [cmdletbinding()]
             param (        
@@ -272,16 +225,51 @@ function Get-BrowserArtifacts{
                 [Parameter][string]
                 $LogFile
             )
-            $LogLevel = @{
+            $logLevel = @{
                 0 = "Info"
                 1 = "Warning"
                 2 = "Error"
             }
-            $Now = Get-Date -Format "yyyyMMddHHmmSSZ" -AsUTC
-            $LoggedMessage = $LogLevel.$Level + "|$Now|$Message"
-            Set-Content -Path $LogFile
+            $now = Get-Date -Format "yyyyMMddHHmmSSZ" -AsUTC
+            $loggedMessage = $LogLevel.$Level + "| $Now | $Message"
+            Out-File -FilePath $LogFile -Append $loggedMessage
         }
 
-        #TODO: Incorporate compression function
+        $ProfilePath = if($TargetUser -like "*@*"){
+            Get-LocalUserFromAlias -TargetUser $TargetUser
+            }else{
+                "C:\Users\$TargetUser"
+            }
+        
+        $AppDataPath = "$Profile\AppData"
+
+        if (!(Get-Item $Outpath)){
+            New-Item -Path $Outpath -ItemType Directory
+        }
+
+        switch ($browser) {
+            condition { 
+                Chrome {
+                    Get-ChromeArtifacts -Outpath $Outpath -AppDataPath $AppDataPath
+                }
+                Firefox {
+                    Get-FirefoxArtifacts -Outpath $Outpath -AppDataPath $AppDataPath
+                }
+                Edge {
+                    Get-EdgeArtifacts -Outpath $Outpath -AppDataPath $AppDataPath
+                }
+                Default {
+                    Get-FirefoxArtifacts -Outpath $Outpath -AppDataPath $AppDataPath
+                    Get-EdgeArtifacts -Outpath $Outpath -AppDataPath $AppDataPath
+                    Get-ChromeArtifacts -Outpath $Outpath -AppDataPath $AppDataPath
+                }
+            }
+        }
+
+
+        Write-Log -Message "Compressing browser artifacts for download"
+        Compress-Archive -Path $Outpath -DestinationPath $Outpath+"BrowserArtifacts.zip" -Force
+        Write-Log -Message "Archive available at " $Outpath+"BrowserArtifacts.zip"
+
         
 }
