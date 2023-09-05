@@ -60,9 +60,13 @@ function Get-ChromiumArtifacts{
 }
 
 function Get-ChromeArtifacts{   
-    $OutPath = (New-Item -ItemType Directory -Path "${OutPath}Chrome").FullName
+    $CollectionPath = (New-Item -ItemType Directory -Path "${OutPath}Chrome").FullName
     $DataPath = "$AppDataPath\Local\Google\Chrome\User Data\"
     $Profiles = Get-ChildItem -Path $dataPath | Where-Object {$_.Name -like "Profile*" -or $_.Name -like "Default"}
+
+    Write-Warning "Closing Chrome processes"
+    Get-Process -Name chrome -ErrorAction SilentlyContinue | Stop-Process -Force
+
     try{
         foreach($p in $Profiles.Name){
             $profilePath = "${DataPath}${p}\"
@@ -82,6 +86,10 @@ function Get-EdgeArtifacts{
     $DataPath = "${AppDataPath}\Local\Microsoft\Edge\User Data\"
     $Profiles = Get-ChildItem -Path $dataPath | Where-Object {$_.Name -like "Profile*" -or $_.Name -like "Default"}
     $OptArtifacts = @('load_statistics.db')
+
+    Write-Warning "Closing Edge processes"
+    Get-Process -Name msedge -ErrorAction SilentlyContinue | Stop-Process -Force
+
     try{
         foreach($p in $Profiles.Name){
             $profilePath = "${DataPath}${p}\"
@@ -99,7 +107,7 @@ function Get-EdgeArtifacts{
 function Get-FirefoxArtifacts{
     $CollectionPath = (New-Item -ItemType Directory -Path "${OutPath}Firefox").FullName
     $DataPath = "$AppDataPath\Roaming\Mozilla\Firefox\Profiles\"
-    $TargetArtifacts = {
+    $TargetArtifacts = @(
         "places.sqlite", 
         "formhistory.sqlite", 
         "downloads.sqlite", 
@@ -108,9 +116,11 @@ function Get-FirefoxArtifacts{
         "signons.sqlite",
         "extensions.json",
         "cache"
-    }
-    
+    )
     $Profiles = Get-ChildItem $dataPath
+
+    write-warning "Closing Firefox processes"
+    Get-Process -Name firefox -ErrorAction SilentlyContinue | Stop-Process -Force
     
     try{
         foreach($p in $Profiles.Name){
@@ -151,9 +161,7 @@ function Get-TargetArtifacts{
 
 $AppDataPath = "C:\Users\$TargetUser\AppData"
 
-if (!(Get-Item $Outpath)){
-    New-Item -Path $Outpath -ItemType Directory
-}
+New-Item -Path $Outpath -ItemType Directory
 
 switch ($Browser) {
         Chrome {
@@ -166,12 +174,14 @@ switch ($Browser) {
             Get-EdgeArtifacts 
         }
         Default {
-            Get-FirefoxArtifacts -Outpath $Outpath -AppDataPath $AppDataPath
-            Get-EdgeArtifacts -Outpath $Outpath -AppDataPath $AppDataPath
-            Get-ChromeArtifacts -Outpath $Outpath -AppDataPath $AppDataPath
+            Get-FirefoxArtifacts 
+            Get-EdgeArtifacts 
+            Get-ChromeArtifacts 
         }
 }
+Remove-Item "${ENV:Temp}\BrowserArtifacts.zip"
 Write-Host "Compressing browser artifacts for download"
-Compress-Archive -Path $Outpath -DestinationPath "${ENV:Temp}\BrowserCollection.zip" -Force
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+[IO.Compression.ZipFile]::CreateFromDirectory($Outpath, "${ENV:Temp}\BrowserArtifacts.zip")
 Remove-Item -Path $Outpath -Recurse -Force
 Write-Host "Archive available at ${Outpath}BrowserArtifacts.zip"
