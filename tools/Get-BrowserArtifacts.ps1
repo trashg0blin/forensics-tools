@@ -184,4 +184,4 @@ Write-Host "Compressing browser artifacts for download"
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 [IO.Compression.ZipFile]::CreateFromDirectory($Outpath, "${ENV:Temp}\BrowserArtifacts.zip")
 Remove-Item -Path $Outpath -Recurse -Force
-Write-Host "Archive available at ${Outpath}BrowserArtifacts.zip"
+Write-Host "Archive available at ${ENV:Temp}\BrowserArtifacts.zip"
