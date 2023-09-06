@@ -150,7 +150,7 @@ function Get-TargetArtifacts{
     foreach($a in $TargetArtifacts){
         try{
             Write-Host "Fetching ${a} from ${SourcePath}}"
-            Copy-Item -Path "${SourcePath}${a}" -Destination "${DestinationPath}${$a}"
+            Copy-Item -Path "${SourcePath}${a}" -Destination "${DestinationPath}${$a}" -Recurse
             Write-Host "$a artifact successfully gathered." 
         }
         catch{
@@ -179,7 +179,7 @@ switch ($Browser) {
             Get-ChromeArtifacts 
         }
 }
-Remove-Item "${ENV:Temp}\BrowserArtifacts.zip"
+Remove-Item "${ENV:Temp}\BrowserArtifacts.zip" -ErrorAction SilentlyContinue
 Write-Host "Compressing browser artifacts for download"
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 [IO.Compression.ZipFile]::CreateFromDirectory($Outpath, "${ENV:Temp}\BrowserArtifacts.zip")
