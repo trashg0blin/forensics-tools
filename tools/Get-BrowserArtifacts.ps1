@@ -29,7 +29,9 @@ param (
     [string]
     $Outpath = "$ENV:Temp\BrowserCollection\",
     [string]
-    $TargetUser
+    $TargetUser,
+    [switch]
+    $IncludeCache
 )
 
 function Get-ChromiumArtifacts{   
@@ -45,7 +47,6 @@ function Get-ChromiumArtifacts{
     $TargetArtifacts = @(
         "History",
         "Network",
-        "Cache",
         "Web data",
         "Extensions",
         "Preferences"
@@ -63,6 +64,9 @@ function Get-ChromeArtifacts{
     $CollectionPath = (New-Item -ItemType Directory -Path "${OutPath}Chrome").FullName
     $DataPath = "$AppDataPath\Local\Google\Chrome\User Data\"
     $Profiles = Get-ChildItem -Path $dataPath | Where-Object {$_.Name -like "Profile*" -or $_.Name -like "Default"}
+    if ($IncludeCache){
+        $OptArtifacts = @('Cache')
+    }
 
     Write-Warning "Closing Chrome processes"
     Get-Process -Name chrome -ErrorAction SilentlyContinue | Stop-Process -Force
@@ -85,8 +89,12 @@ function Get-EdgeArtifacts{
     $CollectionPath = (New-Item -ItemType Directory -Path "${OutPath}Edge").FullName
     $DataPath = "${AppDataPath}\Local\Microsoft\Edge\User Data\"
     $Profiles = Get-ChildItem -Path $dataPath | Where-Object {$_.Name -like "Profile*" -or $_.Name -like "Default"}
+    if ($IncludeCache){
+        $OptArtifacts = @('Cache','load_statistics.db')
+    }
+    else{
     $OptArtifacts = @('load_statistics.db')
-
+    }
     Write-Warning "Closing Edge processes"
     Get-Process -Name msedge -ErrorAction SilentlyContinue | Stop-Process -Force
 
@@ -114,9 +122,9 @@ function Get-FirefoxArtifacts{
         "cookies.sqlite", 
         "search.sqlite",
         "signons.sqlite",
-        "extensions.json",
-        "cache"
+        "extensions.json"
     )
+
     $Profiles = Get-ChildItem $dataPath
 
     write-warning "Closing Firefox processes"
@@ -129,6 +137,10 @@ function Get-FirefoxArtifacts{
             Write-Host "Grabbing profile - $p"
             Get-TargetArtifacts -SourcePath $profilePath -DestinationPath $destinationPath `
                 -TargetArtifacts $TargetArtifacts
+            if ($IncludeCache){
+                Get-TargetArtifacts -SourcePath "${AppDataPath}\Local\Mozilla\Firefox\Profiles\${p}\" `
+                    -DestinationPath "${destinationPath}" -TargetArtifacts @("cache2")   
+            }
         }
     }
     catch {
@@ -154,7 +166,7 @@ function Get-TargetArtifacts{
             Write-Host "$a artifact successfully gathered." 
         }
         catch{
-            Write-Error "Failed to grab $a from ${SourcePath}}"
+            Write-Error "Failed to grab $a from ${SourcePath}"
         }
     }
 }
