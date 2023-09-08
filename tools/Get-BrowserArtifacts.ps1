@@ -9,7 +9,9 @@
 #         .PARAMETER TargetUser
 #             Indicates which local user to retrieve browser data from.
 #         .PARAMETER Outpath
-#             Identifies output directory 
+#             Identifies output directory
+#         .PARAMETER IncludeCache
+#             Modifies collection to grab browser cache
 #         .EXAMPLE
 #             Get-BrowserArtifacts
 #         .EXAMPLE
